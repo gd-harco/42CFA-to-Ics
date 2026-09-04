@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      width: 280px;
+      padding: 14px;
+    }
+    h1 {
+      font-size: 14px;
+      margin: 0 0 10px;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      border: 1px solid #3b4bfd;
+      background: #3b4bfd;
+      color: white;
+      border-radius: 6px;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #333;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>CFA42 → semaines école (.ics)</h1>
+  <button id="extract">Extraire et générer le .ics</button>
+  <div id="status">Ouvre la page du calendrier CFA42, connecté, puis clique.</div>
+  <script src="popup.js"></script>
+</body>
+</html>
