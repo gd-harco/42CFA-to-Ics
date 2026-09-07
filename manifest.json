@@ -1,12 +1,16 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "CFA42 – Export semaines école (.ics)",
   "version": "1.0.0",
   "description": "Extrait les semaines école du calendrier CFA 42 et génère un fichier .ics",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["https://cfa.42.fr/*"],
-  "action": {
+  "permissions": ["activeTab", "tabs", "https://cfa.42.fr/*"],
+  "browser_action": {
     "default_popup": "popup.html",
     "default_title": "Export semaines école CFA42"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "cfa42-export-semaines-ecole@local"
+    }
   }
 }

@@ -1,12 +1,13 @@
 const btn = document.getElementById("extract");
 const statusMessage = document.getElementById("status");
+const browserApi = globalThis.browser ?? globalThis.chrome;
 
 btn.addEventListener("click", async () => {
   btn.disabled = true;
   statusMessage.textContent = "Extraction en cours...";
 
   try {
-    const [tab] = await chrome.tabs.query({
+    const [tab] = await browserApi.tabs.query({
       active: true,
       currentWindow: true,
     });
@@ -22,9 +23,8 @@ btn.addEventListener("click", async () => {
       return;
     }
 
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractSchoolWeeks,
+    const [result] = await browserApi.tabs.executeScript(tab.id, {
+      code: `(${extractSchoolWeeks.toString()})();`,
     });
 
     if (!result || result.schoolDays.length === 0) {

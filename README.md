@@ -1,6 +1,6 @@
 # CFA42 - Export semaines ecole (.ics)
 
-Extension Chrome qui exporte les periodes d'ecole du calendrier CFA 42 vers un fichier calendrier au format ICS, importable dans Google Calendar, Outlook, Apple Calendar et la plupart des agendas.
+Extension Firefox qui exporte les periodes d'ecole du calendrier CFA 42 vers un fichier calendrier au format ICS, importable dans Google Calendar, Outlook, Apple Calendar et la plupart des agendas.
 
 ## Fonctionnement
 
@@ -16,13 +16,12 @@ Un evenement ICS est cree par periode continue, et non par jour. Une semaine don
 
 ## Installation
 
-1. Ouvrir `chrome://extensions` dans Chrome ou un navigateur compatible Chromium.
-2. Activer le **Mode developpeur**.
-3. Cliquer sur **Charger l'extension non empaquetee**.
-4. Selectionner ce dossier: `cfa_to_Ics`.
-5. Epinglez l'extension depuis la barre d'outils si necessaire.
+1. Ouvrir `about:debugging#/runtime/this-firefox` dans Firefox.
+2. Cliquer sur **Charger un module complementaire temporaire...**.
+3. Selectionner le fichier `manifest.json` de ce dossier.
+4. Epinglez l'extension depuis la barre d'outils si necessaire.
 
-Apres une modification des fichiers, cliquer sur l'icone de rechargement de l'extension dans `chrome://extensions`.
+Apres une modification des fichiers, rechargez l'extension depuis `about:debugging`.
 
 ## Utilisation
 
