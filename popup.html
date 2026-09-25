@@ -33,10 +33,26 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+    label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 6px;
+      font-size: 13px;
+      box-sizing: border-box;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
   <h1>CFA42 → semaines école (.ics)</h1>
+  <label>
+    Premier mois du contrat d'alternance (1-12)
+    <input type="number" id="startMonth" min="1" max="12" value="1" />
+  </label>
   <button id="extract">Extraire et générer le .ics</button>
   <div id="status">Ouvre la page du calendrier CFA42, connecté, puis clique.</div>
   <script src="popup.js"></script>

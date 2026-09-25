@@ -6,8 +6,10 @@ Extension Chrome qui exporte les periodes d'ecole du calendrier CFA 42 vers un f
 
 L'extension s'execute uniquement sur `https://cfa.42.fr/students/calendars`.
 
-- Elle repere les cellules du calendrier ayant la classe `bg-accent`.
-- Chaque cellule fournit une date avec son attribut `data-day`, par exemple `2025-11-27`.
+- Elle lit la grille annuelle du calendrier: chaque mois est un bloc `div.grid.grid-cols-7`, dans l'ordre janvier -> decembre, et chaque jour y est une `div` avec un attribut `title`.
+- Le statut du jour est porte par une classe de couleur (`bg-accent` = Ecole sur site, `bg-success` = Ecole a distance, `bg-warning` = Jour entreprise, `bg-purple-500` = Jour ferie, `bg-grey-*` = Week-end/hors perimetre), visible dans la legende ajoutee sous le selecteur d'annee. L'extraction se base sur cette classe plutot que sur le texte (en francais) du `title`, pour rester independante de la langue de l'utilisateur. Seul le statut `bg-accent` (Ecole sur site) est exporte.
+- Le numero du jour est lu depuis le texte visible de la cellule, et le mois depuis la position de son bloc dans la page. L'annee n'apparait pas dans la grille: elle est lue via l'onglet actif du selecteur d'annee (boutons `role="tab"` affichant `2025`, `2026`, ...). L'extension clique automatiquement sur chaque onglet annee pour recuperer toutes les annees disponibles, puis restaure l'onglet initialement actif.
+- L'onglet correspondant a la premiere annee du contrat d'alternance ne commence pas forcement en janvier (ex: contrat debutant en septembre). Le popup demande donc le numero du premier mois du contrat (1-12): ce numero est applique au premier bloc mois de l'annee la plus ancienne affichee; les annees suivantes repartent normalement de janvier. La valeur saisie est memorisee dans le popup pour les prochains exports.
 - Les jours proches sont regroupes en une meme periode; un week-end entre deux jours ecole reste dans la periode.
 - Le fichier telecharge est nomme `semaines-ecole-<username>.ics`.
 - Le nom d'utilisateur est lu dans le `localStorage` de CFA42, dans le profil OIDC. Il n'est pas envoye par l'extension.
@@ -38,13 +40,13 @@ Les evenements sont des evenements sur une journee entiere. Ils contiennent egal
 
 ### Aucun jour ecole detecte
 
-Le site peut modifier ses classes CSS. Le popup affiche alors les classes `bg-*` trouvees. Dans `popup.js`, adaptez la constante suivante dans `extractSchoolWeeks`:
+Le site peut modifier ses classes CSS. Le popup affiche alors les classes `bg-*` trouvees sur les cellules jour. Dans `popup.js`, adaptez la constante suivante dans `extractSchoolWeeks`:
 
 ```js
 const STATUS_CLASS = "bg-accent";
 ```
 
-Par exemple, remplacez `bg-accent` par la classe correspondant au statut que vous souhaitez exporter.
+Par exemple, remplacez `bg-accent` par la classe correspondant au statut que vous souhaitez exporter (voir la legende de couleurs affichee sous le selecteur d'annee sur la page).
 
 ### Nom d'utilisateur inconnu
 

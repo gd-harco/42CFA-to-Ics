@@ -1,11 +1,22 @@
 const btn = document.getElementById("extract");
 const statusMessage = document.getElementById("status");
+const startMonthInput = document.getElementById("startMonth");
+
+const START_MONTH_STORAGE_KEY = "cfa42-contract-start-month";
+const savedStartMonth = localStorage.getItem(START_MONTH_STORAGE_KEY);
+if (savedStartMonth) startMonthInput.value = savedStartMonth;
 
 btn.addEventListener("click", async () => {
   btn.disabled = true;
   statusMessage.textContent = "Extraction en cours...";
 
   try {
+    const contractStartMonth = Math.min(
+      12,
+      Math.max(1, parseInt(startMonthInput.value, 10) || 1),
+    );
+    localStorage.setItem(START_MONTH_STORAGE_KEY, String(contractStartMonth));
+
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
@@ -25,13 +36,14 @@ btn.addEventListener("click", async () => {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractSchoolWeeks,
+      args: [contractStartMonth],
     });
 
     if (!result || result.schoolDays.length === 0) {
       statusMessage.textContent =
         "Aucun jour école détecté. Classes bg-* trouvées sur la page :\n" +
         (result?.debugClasses?.join("\n") || "(aucune)") +
-        "\n\nSi 'bg-accent' n'apparaît pas dans cette liste, le nom de classe a changé — ajuste STATUS_CLASS dans popup.js (fonction extractSchoolWeeks).";
+        "\n\nSi 'bg-accent' n'apparaît pas dans cette liste, la couleur/classe a changé — ajuste STATUS_CLASS dans popup.js (fonction extractSchoolWeeks).";
       btn.disabled = false;
       return;
     }
@@ -40,7 +52,7 @@ btn.addEventListener("click", async () => {
     const filename = `semaines-ecole-${username}.ics`;
     const ics = buildICS(result.schoolDays, username);
     downloadICS(ics, filename);
-    statusMessage.textContent = `OK — ${result.schoolDays.length} jours école exportés dans ${filename}\nUtilisateur : ${username}`;
+    statusMessage.textContent = `OK — ${result.schoolDays.length} semaines écoles exportées dans ${filename}\nUtilisateur : ${username}`;
   } catch (err) {
     statusMessage.textContent = "Erreur : " + err.message;
   } finally {
@@ -51,16 +63,23 @@ btn.addEventListener("click", async () => {
 // ---- Cette fonction est sérialisée et exécutée DANS la page cfa.42.fr ----
 // Elle doit être 100% autonome (pas de référence à des variables externes).
 //
-// Structure réelle du calendrier (composant react-day-picker) :
-//   <td role="gridcell" data-day="2025-11-27" class="... bg-accent ...">
-// data-day est déjà au format ISO (YYYY-MM-DD), donc pas besoin de parser
-// les en-têtes de mois. Le statut du jour est porté par une classe :
-//   bg-accent      -> semaine école (bleu)
-//   bg-warning     -> semaine entreprise (orange)
-//   bg-purple-500  -> jour spécial / férié
-//   bg-grey-300    -> hors périmètre (weekend, jour d'un autre mois, etc.)
-function extractSchoolWeeks() {
-  const STATUS_CLASS = "bg-accent"; // <- change ici pour exporter un autre statut
+// Structure du calendrier (grille annuelle, un bloc <div class="grid grid-cols-7">
+// par mois, dans l'ordre janvier -> décembre) :
+//   <div title="lundi 5 janvier · École sur site\n7h31 / 7 h" class="... bg-accent ...">5</div>
+// Le statut du jour est porté par une classe de couleur (voir la légende
+// ajoutée sous le sélecteur d'année, ex: bg-accent = École sur site,
+// bg-success = École à distance, bg-warning = Jour entreprise,
+// bg-purple-500 = Jour férié). On se base sur cette classe plutôt que sur
+// le texte (français) du title, pour rester indépendant de la langue de
+// l'utilisateur. Le numéro du jour vient du texte visible de la cellule.
+// Le mois est déduit de la position (1-based) du bloc grid-cols-7 dans la
+// page, mais un onglet année peut ne pas commencer en janvier (ex: contrat
+// d'alternance débutant en cours d'année) : pour l'année la plus ancienne
+// affichée, le premier bloc correspond donc à contractStartMonth plutôt qu'à
+// janvier. L'année n'apparaît nulle part dans la grille : elle est lue via
+// l'onglet actif du sélecteur d'année (boutons role="tab" affichant 4 chiffres).
+async function extractSchoolWeeks(contractStartMonth) {
+  const STATUS_CLASS = "bg-accent"; // <- change ici pour exporter un autre statut (voir la légende de couleurs sur la page)
   const OIDC_STORAGE_KEY =
     "oidc.user:https://auth.42.fr/auth/realms/students-42:frontend-react";
   let username = null;
@@ -74,25 +93,91 @@ function extractSchoolWeeks() {
     username = null;
   }
 
-  const cells = Array.from(document.querySelectorAll("td[data-day]"));
+  const pad = (n) => String(n).padStart(2, "0");
+
+  // Lit les cellules jour actuellement affichées dans le DOM pour l'année donnée.
+  // startMonth: numéro du mois (1-12) du premier bloc grid-cols-7 rencontré.
+  function readVisibleDays(year, startMonth) {
+    const days = [];
+    const debugClasses = new Set();
+
+    const monthGrids = document.querySelectorAll("div.grid.grid-cols-7");
+    monthGrids.forEach((grid, index) => {
+      const month = startMonth + index;
+      if (month > 12) return; // sécurité si d'autres grilles 7 colonnes existent sur la page
+
+      for (const cell of grid.querySelectorAll("div[title]")) {
+        const dayNum = parseInt(cell.textContent.trim(), 10);
+        if (!dayNum) continue;
+
+        const bgMatch = cell.className.match(/\bbg-[\w-]+/);
+        debugClasses.add(bgMatch ? bgMatch[0] : "(pas de classe bg-*)");
+
+        if (cell.classList.contains(STATUS_CLASS)) {
+          days.push(`${year}-${pad(month)}-${pad(dayNum)}`);
+        }
+      }
+    });
+
+    return { days, debugClasses };
+  }
+
+  // Attend que l'onglet devienne actif et que son contenu se rende.
+  async function waitTabActive(btn, timeoutMs = 800) {
+    const start = Date.now();
+    while (
+      btn.getAttribute("data-state") !== "active" &&
+      Date.now() - start < timeoutMs
+    ) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+
+  const yearTabs = Array.from(
+    document.querySelectorAll('button[role="tab"]'),
+  ).filter((b) => /^\d{4}$/.test(b.textContent.trim()));
+
   const schoolDays = [];
-  const debugClasses = new Set();
+  const debugStatuses = new Set();
 
-  for (const td of cells) {
-    const day = td.getAttribute("data-day");
-    if (!day) continue;
+  if (yearTabs.length === 0) {
+    // Pas de sélecteur d'année trouvé : on lit directement le contenu affiché.
+    const { days, debugClasses } = readVisibleDays(
+      new Date().getFullYear(),
+      contractStartMonth,
+    );
+    schoolDays.push(...days);
+    debugClasses.forEach((s) => debugStatuses.add(s));
+  } else {
+    const originalActive = yearTabs.find(
+      (b) =>
+        b.getAttribute("data-state") === "active" ||
+        b.getAttribute("aria-selected") === "true",
+    );
+    const minYear = Math.min(
+      ...yearTabs.map((b) => parseInt(b.textContent.trim(), 10)),
+    );
 
-    const bgMatch = td.className.match(/\bbg-[\w-]+/);
-    debugClasses.add(bgMatch ? bgMatch[0] : "(pas de classe bg-*)");
+    for (const btn of yearTabs) {
+      const year = parseInt(btn.textContent.trim(), 10);
+      const startMonth = year === minYear ? contractStartMonth : 1;
+      btn.click();
+      await waitTabActive(btn);
+      const { days, debugClasses } = readVisibleDays(year, startMonth);
+      schoolDays.push(...days);
+      debugClasses.forEach((s) => debugStatuses.add(s));
+    }
 
-    if (td.classList.contains(STATUS_CLASS)) {
-      schoolDays.push(day);
+    if (originalActive) {
+      originalActive.click();
+      await waitTabActive(originalActive);
     }
   }
 
   return {
     schoolDays: Array.from(new Set(schoolDays)).sort(),
-    debugClasses: Array.from(debugClasses),
+    debugClasses: Array.from(debugStatuses),
     username,
   };
 }
