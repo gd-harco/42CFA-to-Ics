@@ -1,22 +1,22 @@
-const btn = document.getElementById("extract");
+const addYearBtn = document.getElementById("addYear");
+const downloadBtn = document.getElementById("download");
 const statusMessage = document.getElementById("status");
-const startMonthInput = document.getElementById("startMonth");
+const SAVED_DAYS_STORAGE_KEY = "cfa42-accumulated-school-days";
+const SAVED_USERNAME_STORAGE_KEY = "cfa42-username";
 
-const START_MONTH_STORAGE_KEY = "cfa42-contract-start-month";
-const savedStartMonth = localStorage.getItem(START_MONTH_STORAGE_KEY);
-if (savedStartMonth) startMonthInput.value = savedStartMonth;
+function loadSavedDays() {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_DAYS_STORAGE_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
 
-btn.addEventListener("click", async () => {
-  btn.disabled = true;
+addYearBtn.addEventListener("click", async () => {
+  addYearBtn.disabled = true;
   statusMessage.textContent = "Extraction en cours...";
 
   try {
-    const contractStartMonth = Math.min(
-      12,
-      Math.max(1, parseInt(startMonthInput.value, 10) || 1),
-    );
-    localStorage.setItem(START_MONTH_STORAGE_KEY, String(contractStartMonth));
-
     const [tab] = await chrome.tabs.query({
       active: true,
       currentWindow: true,
@@ -29,14 +29,13 @@ btn.addEventListener("click", async () => {
     ) {
       statusMessage.textContent =
         "Ouvre d'abord https://cfa.42.fr/students/calendars (connecté) dans l'onglet actif.";
-      btn.disabled = false;
+      addYearBtn.disabled = false;
       return;
     }
 
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractSchoolWeeks,
-      args: [contractStartMonth],
     });
 
     if (!result || result.schoolDays.length === 0) {
@@ -44,41 +43,62 @@ btn.addEventListener("click", async () => {
         "Aucun jour école détecté. Classes bg-* trouvées sur la page :\n" +
         (result?.debugClasses?.join("\n") || "(aucune)") +
         "\n\nSi 'bg-accent' n'apparaît pas dans cette liste, la couleur/classe a changé — ajuste STATUS_CLASS dans popup.js (fonction extractSchoolWeeks).";
-      btn.disabled = false;
+      addYearBtn.disabled = false;
       return;
     }
 
-    const username = result.username || "inconnu";
-    const filename = `semaines-ecole-${username}.ics`;
-    const ics = buildICS(result.schoolDays, username);
-    downloadICS(ics, filename);
-    statusMessage.textContent = `OK — ${result.schoolDays.length} semaines écoles exportées dans ${filename}\nUtilisateur : ${username}`;
+    const allDays = Array.from(
+      new Set([...loadSavedDays(), ...result.schoolDays]),
+    ).sort();
+    localStorage.setItem(SAVED_DAYS_STORAGE_KEY, JSON.stringify(allDays));
+    if (result.username) {
+      localStorage.setItem(SAVED_USERNAME_STORAGE_KEY, result.username);
+    }
+
+    statusMessage.textContent =
+      `OK — ${result.schoolDays.length} jours école trouvés pour l'année ${result.year} (${allDays.length} au total accumulés).\n\n` +
+      'Change l\'année sur la page CFA42 puis reclique sur "Ajouter l\'année affichée" pour continuer, ou clique sur "Télécharger le .ics complet" pour générer le fichier.';
   } catch (err) {
     statusMessage.textContent = "Erreur : " + err.message;
   } finally {
-    btn.disabled = false;
+    addYearBtn.disabled = false;
   }
+});
+
+downloadBtn.addEventListener("click", () => {
+  const allDays = loadSavedDays();
+  if (allDays.length === 0) {
+    statusMessage.textContent =
+      "Aucune donnée accumulée. Clique d'abord sur \"Ajouter l'année affichée\" sur la page du calendrier CFA42.";
+    return;
+  }
+
+  const username =
+    localStorage.getItem(SAVED_USERNAME_STORAGE_KEY) || "inconnu";
+  const filename = `semaines-ecole-${username}.ics`;
+  const ics = buildICS(allDays, username);
+  downloadICS(ics, filename);
+  statusMessage.textContent = `OK — ${allDays.length} jours école exportés dans ${filename}\nUtilisateur : ${username}`;
 });
 
 // ---- Cette fonction est sérialisée et exécutée DANS la page cfa.42.fr ----
 // Elle doit être 100% autonome (pas de référence à des variables externes).
 //
-// Structure du calendrier (grille annuelle, un bloc <div class="grid grid-cols-7">
-// par mois, dans l'ordre janvier -> décembre) :
-//   <div title="lundi 5 janvier · École sur site\n7h31 / 7 h" class="... bg-accent ...">5</div>
-// Le statut du jour est porté par une classe de couleur (voir la légende
-// ajoutée sous le sélecteur d'année, ex: bg-accent = École sur site,
-// bg-success = École à distance, bg-warning = Jour entreprise,
-// bg-purple-500 = Jour férié). On se base sur cette classe plutôt que sur
-// le texte (français) du title, pour rester indépendant de la langue de
-// l'utilisateur. Le numéro du jour vient du texte visible de la cellule.
-// Le mois est déduit de la position (1-based) du bloc grid-cols-7 dans la
-// page, mais un onglet année peut ne pas commencer en janvier (ex: contrat
-// d'alternance débutant en cours d'année) : pour l'année la plus ancienne
-// affichée, le premier bloc correspond donc à contractStartMonth plutôt qu'à
-// janvier. L'année n'apparaît nulle part dans la grille : elle est lue via
-// l'onglet actif du sélecteur d'année (boutons role="tab" affichant 4 chiffres).
-async function extractSchoolWeeks(contractStartMonth) {
+// Chaque jour est une div avec un title du type
+// "lundi 5 janvier · École sur site\n7h31 / 7 h". On lit le jour et le mois
+// directement dans ce texte plutôt que de déduire le mois de la position du
+// bloc "grid-cols-7" dans la page : cette dernière approche s'est révélée
+// non fiable (un bloc en trop/en moins dans le DOM réel décale tous les
+// mois suivants). Seul le statut du jour est détecté via sa classe de
+// couleur (bg-accent), pour rester indépendant de la langue du texte du
+// title.
+//
+// L'onglet année (boutons role="tab") ne peut pas être changé de façon
+// fiable par un clic programmatique (l'appli ne réagit pas toujours à un
+// clic synthétique). On lit donc uniquement l'année actuellement affichée
+// à l'écran ; pour les autres années, l'utilisateur change l'onglet
+// manuellement puis relance l'extraction (les résultats sont cumulés).
+async function extractSchoolWeeks() {
   const STATUS_CLASS = "bg-accent"; // <- change ici pour exporter un autre statut (voir la légende de couleurs sur la page)
   const OIDC_STORAGE_KEY =
     "oidc.user:https://auth.42.fr/auth/realms/students-42:frontend-react";
@@ -93,92 +113,95 @@ async function extractSchoolWeeks(contractStartMonth) {
     username = null;
   }
 
+  const MONTHS = {
+    janvier: 1,
+    février: 2,
+    mars: 3,
+    avril: 4,
+    mai: 5,
+    juin: 6,
+    juillet: 7,
+    août: 8,
+    septembre: 9,
+    octobre: 10,
+    novembre: 11,
+    décembre: 12,
+  };
   const pad = (n) => String(n).padStart(2, "0");
 
   // Lit les cellules jour actuellement affichées dans le DOM pour l'année donnée.
-  // startMonth: numéro du mois (1-12) du premier bloc grid-cols-7 rencontré.
-  function readVisibleDays(year, startMonth) {
+  function readVisibleDays(year) {
     const days = [];
     const debugClasses = new Set();
 
-    const monthGrids = document.querySelectorAll("div.grid.grid-cols-7");
-    monthGrids.forEach((grid, index) => {
-      const month = startMonth + index;
-      if (month > 12) return; // sécurité si d'autres grilles 7 colonnes existent sur la page
+    for (const cell of document.querySelectorAll("div[title]")) {
+      const title = cell.getAttribute("title");
+      if (!title || !title.includes(" · ")) continue;
 
-      for (const cell of grid.querySelectorAll("div[title]")) {
-        const dayNum = parseInt(cell.textContent.trim(), 10);
-        if (!dayNum) continue;
+      const tokens = title.split(" · ")[0].trim().split(/\s+/);
+      const dayNum = parseInt(tokens[1], 10);
+      const month = MONTHS[tokens[2]?.toLowerCase()];
+      if (!dayNum || !month) continue;
 
-        const bgMatch = cell.className.match(/\bbg-[\w-]+/);
-        debugClasses.add(bgMatch ? bgMatch[0] : "(pas de classe bg-*)");
+      const bgMatch = cell.className.match(/\bbg-[\w-]+/);
+      debugClasses.add(bgMatch ? bgMatch[0] : "(pas de classe bg-*)");
 
-        if (cell.classList.contains(STATUS_CLASS)) {
-          days.push(`${year}-${pad(month)}-${pad(dayNum)}`);
-        }
+      if (cell.classList.contains(STATUS_CLASS)) {
+        days.push(`${year}-${pad(month)}-${pad(dayNum)}`);
       }
-    });
+    }
 
     return { days, debugClasses };
   }
 
-  // Attend que l'onglet devienne actif et que son contenu se rende.
-  async function waitTabActive(btn, timeoutMs = 800) {
+  // Attend que le nombre de cellules jour (avec title) de chaque bloc mois
+  // soit identique sur deux lectures consécutives, signe que les données
+  // asynchrones du calendrier ont fini de se charger.
+  async function waitForStableGrids(timeoutMs = 5000) {
     const start = Date.now();
-    while (
-      btn.getAttribute("data-state") !== "active" &&
-      Date.now() - start < timeoutMs
-    ) {
-      await new Promise((r) => setTimeout(r, 20));
+    let lastSignature = null;
+    let stableReads = 0;
+
+    while (Date.now() - start < timeoutMs) {
+      const signature = Array.from(
+        document.querySelectorAll("div.grid.grid-cols-7"),
+      )
+        .map((g) => g.querySelectorAll("div[title]").length)
+        .join(",");
+
+      if (signature && signature === lastSignature) {
+        stableReads++;
+        if (stableReads >= 2) return;
+      } else {
+        stableReads = 0;
+      }
+      lastSignature = signature;
+      await new Promise((r) => setTimeout(r, 120));
     }
-    await new Promise((r) => setTimeout(r, 60));
   }
 
+  // Année actuellement affichée : onglet actif du sélecteur d'année, sinon
+  // année en cours (cas où la page n'a pas ce sélecteur).
   const yearTabs = Array.from(
     document.querySelectorAll('button[role="tab"]'),
   ).filter((b) => /^\d{4}$/.test(b.textContent.trim()));
+  const activeYearTab = yearTabs.find(
+    (b) =>
+      b.getAttribute("data-state") === "active" ||
+      b.getAttribute("aria-selected") === "true",
+  );
+  const year = activeYearTab
+    ? parseInt(activeYearTab.textContent.trim(), 10)
+    : new Date().getFullYear();
 
-  const schoolDays = [];
-  const debugStatuses = new Set();
-
-  if (yearTabs.length === 0) {
-    // Pas de sélecteur d'année trouvé : on lit directement le contenu affiché.
-    const { days, debugClasses } = readVisibleDays(
-      new Date().getFullYear(),
-      contractStartMonth,
-    );
-    schoolDays.push(...days);
-    debugClasses.forEach((s) => debugStatuses.add(s));
-  } else {
-    const originalActive = yearTabs.find(
-      (b) =>
-        b.getAttribute("data-state") === "active" ||
-        b.getAttribute("aria-selected") === "true",
-    );
-    const minYear = Math.min(
-      ...yearTabs.map((b) => parseInt(b.textContent.trim(), 10)),
-    );
-
-    for (const btn of yearTabs) {
-      const year = parseInt(btn.textContent.trim(), 10);
-      const startMonth = year === minYear ? contractStartMonth : 1;
-      btn.click();
-      await waitTabActive(btn);
-      const { days, debugClasses } = readVisibleDays(year, startMonth);
-      schoolDays.push(...days);
-      debugClasses.forEach((s) => debugStatuses.add(s));
-    }
-
-    if (originalActive) {
-      originalActive.click();
-      await waitTabActive(originalActive);
-    }
-  }
+  await waitForStableGrids();
+  const { days, debugClasses } = readVisibleDays(year);
 
   return {
-    schoolDays: Array.from(new Set(schoolDays)).sort(),
-    debugClasses: Array.from(debugStatuses),
+    schoolDays: Array.from(new Set(days)).sort(),
+    debugClasses: Array.from(debugClasses),
     username,
+    year,
   };
 }
 

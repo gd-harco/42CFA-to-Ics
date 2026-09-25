@@ -6,10 +6,10 @@ Extension Chrome qui exporte les periodes d'ecole du calendrier CFA 42 vers un f
 
 L'extension s'execute uniquement sur `https://cfa.42.fr/students/calendars`.
 
-- Elle lit la grille annuelle du calendrier: chaque mois est un bloc `div.grid.grid-cols-7`, dans l'ordre janvier -> decembre, et chaque jour y est une `div` avec un attribut `title`.
-- Le statut du jour est porte par une classe de couleur (`bg-accent` = Ecole sur site, `bg-success` = Ecole a distance, `bg-warning` = Jour entreprise, `bg-purple-500` = Jour ferie, `bg-grey-*` = Week-end/hors perimetre), visible dans la legende ajoutee sous le selecteur d'annee. L'extraction se base sur cette classe plutot que sur le texte (en francais) du `title`, pour rester independante de la langue de l'utilisateur. Seul le statut `bg-accent` (Ecole sur site) est exporte.
-- Le numero du jour est lu depuis le texte visible de la cellule, et le mois depuis la position de son bloc dans la page. L'annee n'apparait pas dans la grille: elle est lue via l'onglet actif du selecteur d'annee (boutons `role="tab"` affichant `2025`, `2026`, ...). L'extension clique automatiquement sur chaque onglet annee pour recuperer toutes les annees disponibles, puis restaure l'onglet initialement actif.
-- L'onglet correspondant a la premiere annee du contrat d'alternance ne commence pas forcement en janvier (ex: contrat debutant en septembre). Le popup demande donc le numero du premier mois du contrat (1-12): ce numero est applique au premier bloc mois de l'annee la plus ancienne affichee; les annees suivantes repartent normalement de janvier. La valeur saisie est memorisee dans le popup pour les prochains exports.
+- Elle lit la grille annuelle du calendrier: chaque jour est une `div` avec un attribut `title` du type `lundi 5 janvier · École sur site`. Le jour et le mois sont lus directement dans ce texte (fiable), plutot que devines depuis la position du bloc mois dans la page (une approche testee puis abandonnee car un bloc en trop/en moins dans le DOM reel decalait tous les mois suivants).
+- Le statut du jour est porte par une classe de couleur (`bg-accent` = Ecole sur site, `bg-success` = Ecole a distance, `bg-warning` = Jour entreprise, `bg-purple-500` = Jour ferie, `bg-grey-*` = Week-end/hors perimetre), visible dans la legende ajoutee sous le selecteur d'annee. L'extraction se base sur cette classe plutot que sur le texte du statut, pour rester independante de la langue de l'utilisateur. Seul le statut `bg-accent` (Ecole sur site) est exporte.
+- L'annee n'apparait pas dans le `title`: elle est lue via l'onglet actif du selecteur d'annee (boutons `role="tab"` affichant `2025`, `2026`, ...). Un clic programmatique sur ces onglets s'est revele peu fiable (l'application ne reagit pas toujours a un clic synthetique), donc l'extension lit uniquement l'annee actuellement affichee a l'ecran.
+- Pour exporter plusieurs annees: change l'onglet annee sur la page CFA42, puis relance l'extraction. Les jours ecole detectes a chaque extraction sont cumules (stockes dans le popup) et le fichier `.ics` telecharge contient toujours l'ensemble cumule.
 - Les jours proches sont regroupes en une meme periode; un week-end entre deux jours ecole reste dans la periode.
 - Le fichier telecharge est nomme `semaines-ecole-<username>.ics`.
 - Le nom d'utilisateur est lu dans le `localStorage` de CFA42, dans le profil OIDC. Il n'est pas envoye par l'extension.
@@ -31,8 +31,10 @@ Apres une modification des fichiers, cliquer sur l'icone de rechargement de l'ex
 1. Se connecter a CFA42.
 2. Ouvrir la page du calendrier: `https://cfa.42.fr/students/calendars`.
 3. Ouvrir le popup de l'extension.
-4. Cliquer sur **Extraire et generer le .ics**.
-5. Importer le fichier ICS telecharge dans l'agenda souhaite.
+4. Cliquer sur **Ajouter l'annee affichee** : les jours ecole de l'annee actuellement visible sont extraits et stockes dans le popup (aucun telechargement a cette etape).
+5. Changer l'onglet annee sur la page CFA42, puis recliquer sur **Ajouter l'annee affichee** pour chaque annee a inclure.
+6. Cliquer sur **Telecharger le .ics complet** pour generer et telecharger le fichier avec l'ensemble des annees ajoutees.
+7. Importer le fichier ICS telecharge dans l'agenda souhaite.
 
 Les evenements sont des evenements sur une journee entiere. Ils contiennent egalement l'emplacement et les coordonnees de 42 Lyon Auvergne-Rhone-Alpes.
 
@@ -47,6 +49,10 @@ const STATUS_CLASS = "bg-accent";
 ```
 
 Par exemple, remplacez `bg-accent` par la classe correspondant au statut que vous souhaitez exporter (voir la legende de couleurs affichee sous le selecteur d'annee sur la page).
+
+### Les dates exportees sont decalees
+
+Si les jours sont detectes mais avec un decalage de quelques jours par rapport au vrai calendrier, verifiez que le mois est toujours lu depuis le texte du `title` de chaque cellule (`lundi 5 janvier · ...`) et non depuis la position d'un bloc mois dans la page: cette derniere methode s'est averee peu fiable.
 
 ### Nom d'utilisateur inconnu
 
